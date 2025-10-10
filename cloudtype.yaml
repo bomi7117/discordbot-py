@@ -1,0 +1,4 @@
+app:
+  name: discordbot
+  language: python
+  run: python discordbot.py
