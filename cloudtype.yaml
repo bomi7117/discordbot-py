@@ -1,0 +1,14 @@
+name: discordbot-py
+
+app: python@3.12
+
+env:
+  - name: TOKEN
+    value: ${TOKEN}  # Cloudtype 환경변수에 등록된 Discord 봇 토큰을 불러옴
+
+build:
+  commands:
+    - pip install -r requirements.txt
+
+start:
+  command: python discordbot.py
