@@ -93,7 +93,7 @@ async def 가입(interaction: Interaction):
         return
 
     add_user(user_id, name)
-    await interaction.response.send_message(f"환영합니다, {name}님! 디스타그램에 가입 완료되었습니다.", ephemeral=True)
+    await interaction.response.send_message(f"환영합니다, {name}님! 디스타그램에 가입 완료되었습니다.", ephemeral=False)
 
 
 # --- 탈퇴 명령어 ---
@@ -351,7 +351,47 @@ async def 잔액변경(
         await log_channel.send(embed=log_embed)
 
 
-# --- 게시물 올리기 (쿨타임 5초) ---
+def check_title_and_reward(user_id, follower):
+    # 칭호 기준
+    titles = [
+        ("🔥 라이징스타", 100, 500),
+        ("🌟 인플루언서", 1000, 1000),
+        ("🎤 연예인", 5000, 1500),
+        ("💢 불행전달자", -100, 300),
+        ("🦇 다크나이트", -1000, 800),
+        ("💀 혐오유발자", -5000, 2000),
+    ]
+
+    conn = sqlite3.connect(DB_FILE)
+    c = conn.cursor()
+    c.execute("SELECT last_title, balance FROM users WHERE user_id = ?", (user_id,))
+    result = c.fetchone()
+    last_title, balance = result if result else ("", 0)
+
+    new_title = last_title
+    reward = 0
+
+    # 팔로워 수 기준 칭호 찾기
+    for title_name, threshold, title_reward in titles:
+        if threshold > 0 and follower >= threshold:
+            new_title = title_name
+            reward = title_reward
+        elif threshold < 0 and follower <= threshold:
+            new_title = title_name
+            reward = title_reward
+
+    # 칭호가 이전과 다르면 1회 지급
+    if new_title != last_title:
+        balance += reward
+        c.execute("UPDATE users SET last_title = ?, balance = ? WHERE user_id = ?", (new_title, balance, user_id))
+        conn.commit()
+        conn.close()
+        return new_title, reward, balance
+    conn.close()
+    return new_title, 0, balance
+
+
+
 @bot.slash_command(name="게시물올리기", description="디스타그램에 게시물을 올립니다.")
 async def 게시물올리기(interaction: Interaction):
     user_id = str(interaction.user.id)
@@ -363,7 +403,7 @@ async def 게시물올리기(interaction: Interaction):
     c = conn.cursor()
     c.execute("SELECT follower, like, hate, last_post_time FROM users WHERE user_id = ?", (user_id,))
     result = c.fetchone()
-    follower, like, hate, last_post_time = result if result else (0, 0, 0, None)
+    follower, like, hate, last_post_time = result if result else (0,0,0,None)
 
     on_cd, secs_left = is_on_cooldown(last_post_time, 0.08)
     if on_cd:
@@ -373,45 +413,42 @@ async def 게시물올리기(interaction: Interaction):
         conn.close()
         return
 
-    success = [
-        "멋진 오운완 사진", "감성 카페에서 찍은 한 컷", "그냥 외모가 원인",
-        "해시태그 전략이 제대로 먹혔다", "스토리 공유 이벤트 덕분에 떡상"
-    ]
-    fail = [
-        "감성글 썼다가 감성팔이로 오해받음", "무심코 한 말이 트리거", "과한 보정",
-        "정치 얘기 살짝 해버림", "짜증나는 광고같이 보임"
-    ]
-    neutral = [
-        "이상하게 이 사진은 다들 무시함", "알고리즘이 나를 버림", "업로드 시간 실패",
-        "너무 자주 올렸더니 피로감 온 듯", "감성 폭발했는데 나만 느낌"
-    ]
+    success = ["멋진 오운완 사진", "감성 카페에서 찍은 한 컷", "그냥 외모가 원인", "해시태그 전략이 제대로 먹혔다", "스토리 공유 이벤트 덕분에 떡상"]
+    fail = ["감성글 썼다가 감성팔이로 오해받음", "무심코 한 말이 트리거", "과한 보정", "정치 얘기 살짝 해버림", "짜증나는 광고같이 보임"]
+    neutral = ["이상하게 이 사진은 다들 무시함", "알고리즘이 나를 버림", "업로드 시간 실패", "너무 자주 올렸더니 피로감 온 듯", "감성 폭발했는데 나만 느낌"]
 
     result_choice = random.choice(["good", "bad", "neutral"])
-
+    msg = ""
     if result_choice == "good":
         origin = random.choice(success)
         follower += 10
         like += 30
-        msg = f"📈 알고리즘을 탔습니다!\n(원인: {origin})\n+10 Follower / +30 Like"
+        msg = f"📈 알고리즘을 탔습니다!\n(원인: {origin})\n+10 Follower / +30 Like / +100원"
     elif result_choice == "bad":
         origin = random.choice(fail)
         follower -= 10
         hate += 30
-        msg = f"📉 논란의 여지가 있는 사진이네요...\n(원인: {origin})\n-10 Follower / +30 Hate"
+        msg = f"📉 논란의 여지가 있는 사진이네요...\n(원인: {origin})\n-10 Follower / +30 Hate / +100원"
     else:
         origin = random.choice(neutral)
-        msg = f"😐 이목을 끌지 못했어요..\n(원인: {origin})\n+0 Follower / +0 Like"
+        msg = f"😐 이목을 끌지 못했어요..\n(원인: {origin})\n+0 Follower / +0 Like / +100원"
 
     c.execute("""
-        UPDATE users SET follower = ?, like = ?, hate = ?, last_post_time = ?
+        UPDATE users
+        SET follower = ?, like = ?, hate = ?, balance = balance + 100, last_post_time = ?
         WHERE user_id = ?
     """, (follower, like, hate, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id))
-
     conn.commit()
     conn.close()
 
+    new_title, reward, balance = check_title_and_reward(user_id, follower)
+    if reward > 0:
+        msg += f"\n🎉 새로운 칭호 달성: {new_title} (+{reward}원)"
+
     embed = nextcord.Embed(title="📸 게시물 업로드", description=msg, color=0xff76c3)
     await interaction.response.send_message(embed=embed)
+
+
 
 
 # --- 내피드 확인 (쿨타임 0초) ---
@@ -464,7 +501,6 @@ async def 내피드(interaction: Interaction):
 
 
 
-# --- 랜덤 이벤트 발생 (쿨타임 5분) ---
 @bot.slash_command(name="이벤트", description="랜덤 이벤트가 발생합니다(쿨타임 : 5분)")
 async def 이벤트(interaction: Interaction):
     user_id = str(interaction.user.id)
@@ -512,52 +548,30 @@ async def 이벤트(interaction: Interaction):
         like += l_change
         hate += h_change
 
-    c.execute("""
-        UPDATE users SET follower = ?, following = ?, like = ?, hate = ?, last_event_time = ?
+    conn.execute("""
+        UPDATE users SET follower = ?, following = ?, like = ?, hate = ?, balance = balance + 200, last_event_time = ?
         WHERE user_id = ?
     """, (follower, following, like, hate, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), user_id))
-
     conn.commit()
     conn.close()
 
-    embed = nextcord.Embed(title="🎲 이벤트 발생!", description=name, color=0xffdf7c)
-    if name == "💤 아무 일도 없었어요":
-        embed.add_field(name="🥱", value="정말 아무 일도 없었어요...", inline=False)
-    else:
-        embed.add_field(name="📊 변화량", value=(
-            f"📈 팔로워: {f_change:+}\n"
-            f"📉 팔로잉: {fg_change:+}\n"
-            f"❤️ 좋아요: {l_change:+}\n"
-            f"💔 싫어요: {h_change:+}"
-        ), inline=False)
+    new_title, reward, balance = check_title_and_reward(user_id, follower)
+    msg = name
+    if reward > 0:
+        msg += f"\n🎉 새로운 칭호 달성: {new_title} (+{reward}원)"
+
+    embed = nextcord.Embed(title="🎲 이벤트 발생!", description=msg, color=0xffdf7c)
+    embed.add_field(name="📊 변화량", value=(
+        f"📈 팔로워: {f_change:+}\n"
+        f"📉 팔로잉: {fg_change:+}\n"
+        f"❤️ 좋아요: {l_change:+}\n"
+        f"💔 싫어요: {h_change:+}\n"
+        f"💰 서버코인: +200원"
+    ), inline=False)
 
     await interaction.response.send_message(embed=embed)
 
 
-@bot.slash_command(name="익명", description="익명으로 메시지를 보냅니다.")
-async def 익명(interaction: nextcord.Interaction, *, 내용: str):
-    # 익명 메시지 전송 (박스 스타일)
-    await interaction.channel.send(f"🗣️ **익명 메시지:**\n```{내용}```")
-
-    # 로그 채널 가져오기
-    log_channel = bot.get_channel(1383790330926858341)  # 숫자형 ID
-    if log_channel:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        nickname = interaction.user.nick if interaction.user.nick else interaction.user.name
-        user_id = interaction.user.id
-
-        # 임베드 만들기
-        embed = nextcord.Embed(title="🗒️ 익명 메시지 로그", color=0x888888)
-        embed.add_field(name="보낸 시각", value=f"`{now}`", inline=False)
-        embed.add_field(name="닉네임", value=f"`{nickname}`", inline=True)
-        embed.add_field(name="유저 ID", value=f"`{user_id}`", inline=True)
-        embed.add_field(name="내용", value=f"```{내용}```", inline=False)
-        embed.set_footer(text="익명 시스템 로그")
-
-        await log_channel.send(embed=embed)
-
-    # 사용자에게 응답 (자신만 보기)
-    await interaction.response.send_message("✅ 익명 메시지가 전송되었습니다.", ephemeral=True)
 
 
 # --- 닉네임 변경 명령어 ---
@@ -580,6 +594,10 @@ async def 닉네임변경(ctx, *, 새_닉네임: str):
             final_nickname = f"「𝑷𝑹」{새_닉네임}"
         elif nextcord.utils.get(user.roles, id=1346819648624132116):
             final_nickname = f"「 𝒎𝒂𝒏𝒂𝒈𝒆𝒓 」 {새_닉네임}"
+        elif nextcord.utils.get(user.roles, id=1406276281729024212):
+            final_nickname = f"「𝑪𝑾」 {새_닉네임}"
+        elif nextcord.utils.get(user.roles, id=1409497831638696087):
+            final_nickname = f"꒰১ 𝑫𝒆𝒔𝒊𝒈𝒏𝒆𝒓 ໒꒱ {새_닉네임}"
         elif nextcord.utils.get(user.roles, id=1346837818072236114):
             final_nickname = f"꒰১ 𝐕𝐈𝐏 ໒꒱ {새_닉네임}"
         elif nextcord.utils.get(user.roles, id=1346838203419852810):
