@@ -23,7 +23,7 @@ DB_FILE = "data.db"
 LOG_CHANNEL_ID=1391461568734302318
 
 
-# --- DB 초기화 함수 ---
+# -db초기화
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     c = conn.cursor()
@@ -39,11 +39,13 @@ def init_db():
         last_post_time TEXT,
         last_feed_time TEXT,
         last_event_time TEXT,
-        last_checkin_time TEXT
+        last_checkin_time TEXT,
+        last_title TEXT DEFAULT ''
     )
     """)
     conn.commit()
     conn.close()
+
 
 
 # --- 유저 존재 확인 ---
